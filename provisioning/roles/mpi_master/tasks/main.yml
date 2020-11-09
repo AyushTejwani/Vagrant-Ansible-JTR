@@ -1,0 +1,55 @@
+---
+
+- name: Ensure MPI user exists with public/private key
+  user:
+    name: "{{ mpi_user }}"
+    generate_ssh_key: yes
+    ssh_key_bits: 2048
+    ssh_key_file: .ssh/id_rsa
+
+- name: Read MPI user's public key
+  slurp:
+    src: "~{{ mpi_user }}/.ssh/id_rsa.pub"
+  register: public_key
+
+- name: Ensure MPI user's public key is available to slaves in NFS share
+  blockinfile:
+    dest: "{{ shared_master_public_key_file_path }}"
+    block: "{{ public_key['content'] | b64decode }}"
+    state: present
+    create: yes
+
+- name: Ensure MPI user has permission to access NFS share
+  file:
+    path: "{{ mpi_data_share }}"
+    state: directory
+    recurse: yes
+    owner: "{{ mpi_user }}"
+    group: "{{ mpi_user }}"
+    mode: 0755
+
+- name: Read slave SSH host keys
+  shell: ssh-keyscan {{ item }}
+  with_items: "{{ groups['slaves'] }}"
+  register: keyscan_results
+  changed_when: False
+
+- name: Ensure master's known_hosts contains slave SSH host keys for connections without confirmations
+  lineinfile:
+    dest: "~{{ mpi_user }}/.ssh/known_hosts"
+    line: "{{ item }}"
+    regexp: "^{{ item | regex_replace('^([^ ]+ [^ ]+) .*', '\\1') }}"
+    state: present
+    create: yes
+    owner: "{{ mpi_user }}"
+    group: "{{ mpi_user }}"
+  with_items: "{{ keyscan_results.results | map(attribute='stdout_lines') | list }}"
+
+- name: Ensure all hosts listed in MPI hosts file with slot availability
+  lineinfile:
+    dest: "{{ mpi_hosts_file }}"
+    regexp: "^{{item}} "
+    line: "{{ item }} slots={{ hostvars[item]['slots'] | default(1) }}"
+    state: present
+    create: yes
+  with_items: "{{ groups['all'] }}"

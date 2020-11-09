@@ -1,0 +1,5 @@
+---
+
+dependencies:
+  - { role: mpi_base }
+  - { role: geerlingguy.nfs, nfs_exports: [ "{{ mpi_data_share }} *(ro,sync,no_root_squash)" ] }
